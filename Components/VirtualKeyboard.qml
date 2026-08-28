@@ -28,6 +28,30 @@ import QtQuick.VirtualKeyboard
 InputPanel {
     id: virtualKeyboard
     property bool activated: false
-    active: activated && Qt.inputMethod.visible
+
+    // NO configurar aquí VirtualKeyboardSettings.layout / layoutPath.
+    //
+    // Es tentador "arreglar" el teclado forzando una página concreta desde
+    // Component.onCompleted (otros temas SDDM lo hacen: SilentSDDM pone
+    // VirtualKeyboardSettings.layout = "symbols"). Eso es precisamente lo que
+    // rompe la tecla shift: en la página de símbolos shift no da mayúsculas,
+    // solo alterna entre grupos de símbolos. Dejando la propiedad sin tocar,
+    // Keyboard.qml calcula `layoutType` solo ("main" para un campo de texto
+    // normal) y `onActiveChanged` limpia `symbolMode` cada vez que el panel
+    // pasa a activo, que es el comportamiento correcto.
+    //
+    // Tampoco hay que compensar nada por el campo de contraseña: aunque
+    // QQuickTextInput añade Qt.ImhSensitiveData / ImhHiddenText /
+    // ImhNoAutoUppercase cuando echoMode es Password, esos flags solo apagan
+    // la autocapitalización (ShiftHandler.autoCapitalizationEnabled), no la
+    // tecla shift (ShiftHandler.toggleShiftEnabled sigue siendo true).
+    // Verificado contra Qt 6.11.2: con este mismo wrapper, pulsar shift y
+    // luego una letra inserta la mayúscula en un TextField con
+    // echoMode: TextInput.Password.
+
+    // `Qt.inputMethod` está tipado como QObject, así que qmllint no puede
+    // resolver `visible` y avisa de missing-property; la propiedad existe en
+    // tiempo de ejecución (QInputMethod::visible).
+    active: activated && Qt.inputMethod.visible // qmllint disable missing-property
     visible: active
 }

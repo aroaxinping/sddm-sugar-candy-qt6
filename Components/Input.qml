@@ -238,7 +238,20 @@ Column {
             placeholderText: config.TranslatePlaceholderPassword || textConstants.password
             horizontalAlignment: TextInput.AlignHCenter
             passwordCharacter: "•"
-            passwordMaskDelay: config.ForceHideCompletePassword == "true" ? undefined : 1000
+            // Enmascarado inmediato: 0 ms significa que ningún carácter llega a
+            // mostrarse en claro, ni siquiera un instante mientras se escribe.
+            // Antes esto era `config.ForceHideCompletePassword == "true" ? undefined : 1000`,
+            // es decir, con la opción desactivada (el valor por defecto del tema) se
+            // revelaba el último carácter tecleado durante 1 segundo. Ese retardo es un
+            // comportamiento pensado para teclados táctiles y aquí es una fuga de
+            // privacidad: alguien mirando por encima del hombro puede leer la
+            // contraseña carácter a carácter.
+            // La opción ForceHideCompletePassword se sigue respetando: su semántica
+            // ("no ver ningún carácter, ni siquiera al escribirlo") es exactamente lo
+            // que hace ahora el tema siempre, así que ponerla a "true" no cambia nada
+            // y ponerla a "false" ya no reintroduce la fuga. Para ver la contraseña
+            // existe la casilla explícita "Show Password" (revealSecret) de abajo.
+            passwordMaskDelay: 0
             renderType: Text.QtRendering
             background: Rectangle {
                 color: "transparent"

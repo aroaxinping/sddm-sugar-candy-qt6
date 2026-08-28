@@ -32,6 +32,62 @@ screen that never appears and a drop to a TTY.
 
 Verified with `qmllint` from Qt 6.11 — no errors in any file.
 
+## Fixes beyond the port
+
+The migration exposed a few genuine bugs in the upstream theme. These are fixed here.
+
+### Password characters were revealed for a full second
+
+Upstream hardcoded a one-second reveal of each typed character:
+
+```qml
+passwordMaskDelay: config.ForceHideCompletePassword == "true" ? undefined : 1000
+```
+
+This is not a Qt default — the theme asked for it. Anyone glancing at the screen could read
+the password one character at a time. Now masked immediately (`passwordMaskDelay: 0`).
+
+The "Show Password" checkbox is untouched: revealing the password stays a deliberate action.
+
+### Login form stretched on ultrawide displays
+
+The form was sized as a fraction of total screen width:
+
+```qml
+width: parent.width / 2.5
+```
+
+On 1920px that is 768px. On a 5120px ultrawide it is **2048px** — a form as wide as an entire
+monitor, which looks flat and disproportionate.
+
+Now capped: `Math.min(width / 2.5, height * 0.72)`. The `0.72` is calibrated so **16:9 output is
+identical to upstream** — nothing changes on standard displays. No resolution is hardcoded.
+
+The virtual keyboard was also spanning the full screen width and is now capped the same way.
+
+### `Screen.ScreenWidth` does not exist
+
+```qml
+width: config.ScreenWidth || Screen.ScreenWidth   // undefined
+```
+
+The fallback referenced a property that does not exist in Qt, so leaving `ScreenWidth` empty in
+`theme.conf` left the root window width `undefined`. Fixed to `Screen.width`.
+
+## New `theme.conf` options
+
+All optional; the theme behaves exactly as before if you leave them alone.
+
+| Option | Default | Purpose |
+|---|---|---|
+| `FormMaxWidth` | `""` | Max login form width in px. Empty = automatic, proportional to screen height. |
+| `BackgroundFillBlurBackdrop` | `"false"` | Fill leftover space with a cropped, blurred copy of the background instead of empty bars. Only applies when `ScaleImageCropped="false"`. |
+| `BackdropBlurRadius` | `"64"` | Blur strength for the backdrop above. |
+
+On very wide displays, `ScaleImageCropped="false"` together with
+`BackgroundFillBlurBackdrop="true"` shows a 16:9 wallpaper whole and centred instead of
+magnifying and cropping it.
+
 ## Requirements
 
 - SDDM 0.21+ built against Qt6

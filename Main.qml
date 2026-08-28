@@ -32,7 +32,9 @@ Pane {
     id: root
 
     height: config.ScreenHeight || Screen.height
-    width: config.ScreenWidth || Screen.ScreenWidth
+    // Antes: "Screen.ScreenWidth", que no existe -> width quedaba undefined
+    // cuando ScreenWidth no estaba configurado en theme.conf.
+    width: config.ScreenWidth || Screen.width
 
     LayoutMirroring.enabled: config.ForceRightToLeft == "true" ? true : Qt.application.layoutDirection === Qt.RightToLeft
     LayoutMirroring.childrenInherit: true
@@ -47,6 +49,29 @@ Pane {
     font.family: config.Font
     font.pointSize: config.FontSize !== "" ? config.FontSize : parseInt(height / 80)
     focus: true
+
+    //
+    // --- Adaptación a pantallas ultrapanorámicas (21:9, 32:9, ...) ---
+    //
+    // El diseño original dimensiona el formulario como una fracción del ANCHO
+    // total (width / 2.5). En un 16:9 eso da ~768px sobre 1920, pero en un
+    // 5120x1440 da 2048px: los campos, el reloj y los botones se estiran
+    // horizontalmente y el conjunto "se ve ensanchado".
+    //
+    // Solución independiente de la resolución: limitar el ancho del formulario
+    // en función de la ALTURA de la pantalla, que es la dimensión que no crece
+    // al hacerse la pantalla más panorámica. El factor 0.72 está elegido para
+    // que en 16:9 el resultado sea idéntico al original (1080 * 0.72 ≈ 778 ≈
+    // 1920 / 2.5), de modo que nada cambia en pantallas convencionales y sólo
+    // se recorta en las muy anchas. En pantallas cuadradas o verticales manda
+    // el término width / 2.5 gracias al Math.min.
+    //
+    // Opción nueva (opcional) en theme.conf: FormMaxWidth="900"
+    //   Entero en píxeles. Si se define, sustituye al cálculo automático.
+    //   Vacío o ausente => cálculo automático descrito arriba.
+    readonly property real formWidthCap: config.FormMaxWidth ? parseInt(config.FormMaxWidth)
+                                                             : Math.round(height * 0.72)
+    readonly property real formWidth: Math.min(width / 2.5, formWidthCap)
 
     property bool leftleft: config.HaveFormBackground == "true" &&
                             config.PartialBlur == "false" &&
@@ -99,7 +124,8 @@ Pane {
             id: form
 
             height: virtualKeyboard.state == "visible" ? parent.height - virtualKeyboard.implicitHeight : parent.height
-            width: parent.width / 2.5
+            // Antes: parent.width / 2.5 (desproporcionado en ultrapanorámico).
+            width: root.formWidth
             anchors.horizontalCenter: config.FormPosition == "center" ? parent.horizontalCenter : undefined
             anchors.left: config.FormPosition == "left" ? parent.left : undefined
             anchors.right: config.FormPosition == "right" ? parent.right : undefined
@@ -132,7 +158,13 @@ Pane {
             state: "hidden"
             property bool keyboardActive: item ? item.active : false
             onKeyboardActiveChanged: keyboardActive ? state = "visible" : state = "hidden"
-            width: parent.width
+            // El teclado virtual a 5120px de ancho resulta impracticable: las
+            // teclas quedan separadas metro y medio. Se limita igual que el
+            // formulario (proporcional a la altura) y se centra. En 16:9 el
+            // límite (1080*2 = 2160) es mayor que el ancho, así que sigue
+            // ocupando el 100% como antes.
+            width: Math.min(parent.width, root.height * 2)
+            anchors.horizontalCenter: parent.horizontalCenter
             z: 1
             function switchState() { state = state == "hidden" ? "visible" : "hidden" }
             states: [
@@ -209,6 +241,49 @@ Pane {
                     }
                 }
             ]
+        }
+
+        // Relleno ("backdrop") para el modo ScaleImageCropped="false".
+        //
+        // Con PreserveAspectFit una imagen 16:9 en una pantalla 32:9 deja
+        // enormes franjas vacías a los lados; con PreserveAspectCrop la misma
+        // imagen se amplía x2.7 y se recorta casi todo, que es lo que hace que
+        // el fondo se vea "ensanchado" y basto en ultrapanorámico.
+        //
+        // Este backdrop permite la tercera vía, la que usan los reproductores
+        // de vídeo: la imagen se muestra entera (Fit, sin deformar ni recortar)
+        // y el espacio sobrante se rellena con una copia recortada y desenfocada
+        // de la propia imagen. Es opt-in para no cambiar el aspecto de nadie.
+        //
+        // Opciones nuevas (opcionales) en theme.conf:
+        //   BackgroundFillBlurBackdrop="true"   -> activa el relleno; sólo tiene
+        //       efecto si ScaleImageCropped="false".
+        //   BackdropBlurRadius="64"             -> fuerza del desenfoque del
+        //       relleno. Vacío o ausente => 64.
+        Image {
+            id: backdropSource
+            anchors.fill: backgroundImage
+            source: backgroundImage.source
+            fillMode: Image.PreserveAspectCrop
+            asynchronous: true
+            cache: true
+            // Sólo sirve de textura para el GaussianBlur de abajo.
+            visible: false
+        }
+
+        GaussianBlur {
+            id: backdrop
+
+            readonly property int blurRadius: config.BackdropBlurRadius ? parseInt(config.BackdropBlurRadius) : 64
+
+            anchors.fill: backgroundImage
+            source: backdropSource
+            radius: blurRadius
+            samples: blurRadius * 2 + 1
+            cached: true
+            visible: config.BackgroundFillBlurBackdrop == "true" && config.ScaleImageCropped != "true"
+            // Por debajo de la imagen nítida (z 0) y del resto del interfaz (z 1).
+            z: -1
         }
 
         Image {
