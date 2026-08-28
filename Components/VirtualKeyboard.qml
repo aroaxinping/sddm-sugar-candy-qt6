@@ -49,6 +49,40 @@ InputPanel {
     // luego una letra inserta la mayúscula en un TextField con
     // echoMode: TextInput.Password.
 
+    // IMPORTANTE — si shift no funciona (o el panel no llega a aparecer), el
+    // fallo NO está en este fichero: es configuración de SDDM.
+    //
+    // SDDM 0.21.0 descarta a propósito el teclado virtual cuando el greeter
+    // corre sobre Wayland. En src/greeter/GreeterApp.cpp, antes de construir
+    // QGuiApplication:
+    //
+    //     QString inputMethod = SDDM::mainConfig.InputMethod.get();
+    //     if (platform.startsWith("wayland") && inputMethod == "qtvirtualkeyboard")
+    //         inputMethod = QString{};              // <-- se vacía
+    //     if (!inputMethod.isEmpty())
+    //         qputenv("QT_IM_MODULE", inputMethod.toLocal8Bit());
+    //
+    // O sea: con DisplayServer=wayland, `InputMethod=qtvirtualkeyboard` se
+    // ignora y QT_IM_MODULE nunca se define. Sin esa variable el plugin
+    // libqtvirtualkeyboardplugin.so no es el platform input context, y
+    // entonces InputContext.priv.inputItem es null y
+    // ShiftHandler.toggleShiftEnabled queda en false: shift muerta. Medido con
+    // Qt 6.11.2 sobre este mismo wrapper (sin QT_IM_MODULE: active=false,
+    // toggleShiftEnabled=false, inputItem=null; con QT_IM_MODULE=qtvirtualkeyboard:
+    // active=true, toggleShiftEnabled=true, inputItem=<TextField>).
+    //
+    // Por eso el síntoma es idéntico en cualquier tema (SilentSDDM incluido):
+    // es de sistema, no del QML. Arreglo, en /etc/sddm.conf.d/ (GreeterEnvironment
+    // se inyecta en el proceso del greeter desde src/helper/Backend.cpp y
+    // GreeterApp nunca la borra, así que sobrevive al descarte de arriba):
+    //
+    //     [General]
+    //     GreeterEnvironment=QT_WAYLAND_SHELL_INTEGRATION=layer-shell,QT_IM_MODULE=qtvirtualkeyboard
+    //
+    // Ojo: GreeterEnvironment se sustituye entera, no se acumula, así que hay
+    // que repetir el QT_WAYLAND_SHELL_INTEGRATION que trae
+    // /usr/lib/sddm/sddm.conf.d/zz-wayland.conf o el greeter pierde layer-shell.
+
     // `Qt.inputMethod` está tipado como QObject, así que qmllint no puede
     // resolver `visible` y avisa de missing-property; la propiedad existe en
     // tiempo de ejecución (QInputMethod::visible).
