@@ -3,8 +3,9 @@
 Qt6 / Plasma 6 port of [Marian Arlt's Sugar Candy](https://framagit.org/MarianArlt/sddm-sugar-candy)
 SDDM theme. The original targets Qt5 only and has not been updated since February 2020.
 
-**Visually identical to the original.** This fork changes nothing but the imports and the
-Qt version declaration.
+**Identical to the original out of the box.** The port itself only changes the imports and the
+Qt version declaration; the bug fixes and the one new feature (video backgrounds) are opt-in or
+invisible unless you go looking for them.
 
 ## Why this exists
 
@@ -74,6 +75,52 @@ width: config.ScreenWidth || Screen.ScreenWidth   // undefined
 The fallback referenced a property that does not exist in Qt, so leaving `ScreenWidth` empty in
 `theme.conf` left the root window width `undefined`. Fixed to `Screen.width`.
 
+## New feature: video backgrounds
+
+Neither upstream nor any fork supports this. `Background` now also accepts a **video file**:
+
+```ini
+Background="Backgrounds/loop.mp4"
+```
+
+That is the whole configuration. No new option to enable, nothing else to set.
+
+- **Detected by file extension** — `.mp4`, `.mkv`, `.webm`, `.mov`, `.avi`, `.m4v`
+  (case-insensitive). Anything else keeps using the original `Image`, so **nothing changes
+  for static wallpapers**.
+- **Loops forever, always silent.** The player is created without an `AudioOutput`, so it
+  cannot produce sound at all — more reliable than setting the volume to zero, and it does
+  not need an audio server in the greeter session.
+- `DimBackgroundImage`, `ScaleImageCropped`, `BackgroundImageHAlignment`,
+  `BackgroundImageVAlignment`, `PartialBlur` and `FullBlur` all work on video exactly as they
+  do on images. `VideoOutput` has no alignment property of its own, so the frame is sized from
+  the video's real aspect ratio and positioned by hand inside a clipping item.
+
+Requires **QtMultimedia** (`qt6-multimedia` plus a backend such as `qt6-multimedia-ffmpeg`).
+
+### It cannot break your login screen
+
+This is the part that matters. A greeter that fails to start locks you out of your own
+machine, so the feature is built to fail quietly at two separate levels:
+
+1. **QtMultimedia missing.** `import QtMultimedia` is a hard import — a file declaring it will
+   not compile if the module is absent. That import therefore lives in its own file,
+   `VideoBackground.qml`, loaded through a `Loader`. Without the module the `Loader` simply
+   goes to `Loader.Error`, stays empty, and logs a warning. Everything else — form, clock,
+   virtual keyboard, power buttons — is untouched.
+2. **Video unplayable** (missing codec, corrupt or absent file). `VideoBackground.qml` catches
+   `errorOccurred` / `InvalidMedia` and hides itself.
+
+In both cases you get the theme's `BackgroundColor` and a perfectly usable login screen.
+
+### Notes
+
+- `FullBlur="true"` over video blurs **every frame** and cannot be cached, so it costs real
+  GPU time. `PartialBlur` only blurs the strip behind the form and is much cheaper.
+- `BackgroundFillBlurBackdrop` is image-only; with video the frame is positioned directly.
+- Keep the clip short and modest in bitrate. It decodes on the greeter's session, before you
+  have logged in.
+
 ## New `theme.conf` options
 
 All optional; the theme behaves exactly as before if you leave them alone.
@@ -83,6 +130,7 @@ All optional; the theme behaves exactly as before if you leave them alone.
 | `FormMaxWidth` | `""` | Max login form width in px. Empty = automatic, proportional to screen height. |
 | `BackgroundFillBlurBackdrop` | `"false"` | Fill leftover space with a cropped, blurred copy of the background instead of empty bars. Only applies when `ScaleImageCropped="false"`. |
 | `BackdropBlurRadius` | `"64"` | Blur strength for the backdrop above. |
+| `VideoBackgroundExtensions` | `""` | Comma-separated list to *extend* the extensions treated as video (e.g. `"ogv,ts"`). Empty = the built-in list. Only needed for unusual containers. |
 
 On very wide displays, `ScaleImageCropped="false"` together with
 `BackgroundFillBlurBackdrop="true"` shows a 16:9 wallpaper whole and centred instead of
@@ -92,6 +140,8 @@ magnifying and cropping it.
 
 - SDDM 0.21+ built against Qt6
 - `qt5compat` (provides `Qt5Compat.GraphicalEffects`)
+- `qt6-multimedia` + a backend (`qt6-multimedia-ffmpeg`) — **only** for video backgrounds.
+  Not needed, and not loaded, if `Background` points at an image.
 
 ## Install
 

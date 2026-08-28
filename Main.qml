@@ -73,6 +73,46 @@ Pane {
                                                              : Math.round(height * 0.72)
     readonly property real formWidth: Math.min(width / 2.5, formWidthCap)
 
+    //
+    // --- Fondo de vídeo ---
+    //
+    // `Background` acepta ahora también un vídeo. No hay opción nueva
+    // obligatoria: se decide por la extensión del fichero. Si es un vídeo se
+    // carga "VideoBackground.qml" mediante un Loader; si no, se usa el Image
+    // de toda la vida y nada cambia.
+    //
+    // El import de QtMultimedia vive en VideoBackground.qml, no aquí, para que
+    // la ausencia del módulo no impida arrancar el greeter. Ver el comentario
+    // de cabecera de ese fichero.
+    //
+    // Opción nueva (opcional) en theme.conf: VideoBackgroundExtensions=""
+    //   Lista separada por comas para ampliar las extensiones reconocidas
+    //   (p. ej. "ogv,ts"). Vacío o ausente => la lista por defecto de abajo.
+    readonly property string backgroundSource: String(config.background || config.Background || "")
+
+    readonly property var videoExtensions: {
+        var defaults = ["mp4", "mkv", "webm", "mov", "avi", "m4v"];
+        var extra = String(config.VideoBackgroundExtensions || "");
+        if (extra.length > 0) {
+            var parts = extra.split(",");
+            for (var i = 0; i < parts.length; ++i) {
+                var e = parts[i].trim().toLowerCase().replace(/^\./, "");
+                if (e.length > 0 && defaults.indexOf(e) < 0)
+                    defaults.push(e);
+            }
+        }
+        return defaults;
+    }
+
+    readonly property bool backgroundIsVideo: {
+        // Se ignora una posible query string (?foo) para no romper con urls.
+        var path = root.backgroundSource.split("?")[0];
+        var dot = path.lastIndexOf(".");
+        if (dot < 0)
+            return false;
+        return root.videoExtensions.indexOf(path.substring(dot + 1).toLowerCase()) >= 0;
+    }
+
     property bool leftleft: config.HaveFormBackground == "true" &&
                             config.PartialBlur == "false" &&
                             config.FormPosition == "left" &&
@@ -99,6 +139,11 @@ Pane {
         anchors.fill: parent
         height: parent.height
         width: parent.width
+
+        // Capa que hace de fondo "real" para los efectos de desenfoque:
+        // el Image de siempre, o el Loader del vídeo cuando toca. Así
+        // PartialBlur y FullBlur funcionan igual en ambos casos.
+        readonly property Item blurSourceItem: root.backgroundIsVideo ? backgroundVideo : backgroundImage
 
         Rectangle {
             id: tintLayer
@@ -281,7 +326,11 @@ Pane {
             radius: blurRadius
             samples: blurRadius * 2 + 1
             cached: true
-            visible: config.BackgroundFillBlurBackdrop == "true" && config.ScaleImageCropped != "true"
+            // El backdrop es sólo para imagen: con vídeo, VideoBackground.qml
+            // ya coloca el fotograma y no hay copia estática que desenfocar.
+            visible: config.BackgroundFillBlurBackdrop == "true" &&
+                     config.ScaleImageCropped != "true" &&
+                     !root.backgroundIsVideo
             // Por debajo de la imagen nítida (z 0) y del resto del interfaz (z 1).
             z: -1
         }
@@ -309,12 +358,48 @@ Pane {
                                config.BackgroundImageVAlignment == "bottom" ?
                                Image.AlignBottom : Image.AlignVCenter
 
-            source: config.background || config.Background
+            // Con fondo de vídeo el Image no carga nada, pero se mantiene en
+            // el layout: sigue siendo la referencia de geometría (anchors,
+            // ancho reducido por formBackground...) para el vídeo y el blur.
+            source: root.backgroundIsVideo ? "" : root.backgroundSource
+            visible: !root.backgroundIsVideo
             fillMode: config.ScaleImageCropped == "true" ? Image.PreserveAspectCrop : Image.PreserveAspectFit
             asynchronous: true
             cache: true
             clip: true
             mipmap: true
+        }
+
+        // Fondo de vídeo. Sólo se instancia si `Background` apunta a un vídeo.
+        //
+        // Degradación elegante en dos niveles:
+        //   1. Si QtMultimedia no está instalado, el Loader entra en
+        //      Loader.Error, queda vacío y se ve el BackgroundColor.
+        //   2. Si el módulo está pero el vídeo no se puede decodificar,
+        //      VideoBackground.qml se oculta a sí mismo (propiedad `failed`).
+        // En ambos casos el greeter sigue siendo usable, que es lo único
+        // innegociable aquí.
+        Loader {
+            id: backgroundVideo
+
+            anchors.fill: backgroundImage
+            active: root.backgroundIsVideo
+            source: "VideoBackground.qml"
+            asynchronous: false
+
+            onLoaded: {
+                item.videoSource = root.backgroundSource;
+                item.cropped = config.ScaleImageCropped != "false";
+                item.hAlignment = config.BackgroundImageHAlignment || "center";
+                item.vAlignment = config.BackgroundImageVAlignment || "center";
+            }
+
+            onStatusChanged: {
+                if (status == Loader.Error)
+                    console.warn("Sugar Candy: no se pudo cargar el fondo de vídeo. " +
+                                 "¿Falta el módulo QtMultimedia (paquete qt6-multimedia)? " +
+                                 "Se usará el color de fondo.");
+            }
         }
 
         MouseArea {
@@ -325,7 +410,7 @@ Pane {
         ShaderEffectSource {
             id: blurMask
 
-            sourceItem: backgroundImage
+            sourceItem: sizeHelper.blurSourceItem
             width: form.width
             height: parent.height
             anchors.centerIn: form
@@ -338,10 +423,12 @@ Pane {
 
             height: parent.height
             width: config.FullBlur == "true" ? parent.width : form.width
-            source: config.FullBlur == "true" ? backgroundImage : blurMask
+            source: config.FullBlur == "true" ? sizeHelper.blurSourceItem : blurMask
             radius: config.BlurRadius
             samples: config.BlurRadius * 2 + 1
-            cached: true
+            // Con vídeo NO se puede cachear: el caché congela el primer
+            // fotograma y el fondo se quedaría quieto.
+            cached: !root.backgroundIsVideo
             anchors.centerIn: config.FullBlur == "true" ? parent : form
             visible: config.FullBlur == "true" || config.PartialBlur == "true" ? true : false
         }
